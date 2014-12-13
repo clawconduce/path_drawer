@@ -1,0 +1,192 @@
+<head>
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+<style>
+.float {
+    float: left;
+}
+</style>
+
+<script>
+$(function() {
+    var $img_obj = null;
+    var paths = [];
+    var last_path = null;
+    var start_time = null;
+    var bltr = null;
+    var img_w = null;
+    var img_h = null;
+    var canvas = $('#canvas')[0];
+    var ctx = canvas.getContext('2d');
+    //this could probably be done better, but right now
+    //this is to make the canvas fit in the page nicely
+    ctx.canvas.width  = window.innerWidth*0.75;
+    ctx.canvas.height = window.innerHeight-40;
+
+    $('#file-input').change(function(e) {
+        var file = e.target.files[0];
+
+        var imageType = /image.*/;
+        if (!file.type.match(imageType))
+            return;
+
+        var reader = new FileReader();
+        reader.onload = fileOnload;
+        reader.readAsDataURL(file);
+    });
+
+    $('#coords-input').change(function(e) {
+        var file = e.target.files[0];
+
+        if (!file.type.match('application/json'))
+            return;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var bltr_data = JSON.parse(e.target.result);
+            if ((bltr_data['bl'].length == 2) && (bltr_data['tr'].length == 2)) {
+                bltr = bltr_data
+            }
+        }
+        reader.readAsText(file);
+    });
+
+    function draw_img_on_canvas(){
+        var ctx = canvas.getContext('2d');
+        //scale the image
+        var height = $img_obj.height;
+        var width = $img_obj.width;
+        var cap_size = ctx.canvas.width*0.75;
+        if (width > cap_size) {
+            var ratio = width/cap_size;
+            img_w = cap_size;
+            img_h = height/ratio;
+        } else {
+            img_w = width;
+            img_h = height;
+        }
+        ctx.canvas.height = img_h;
+        ctx.drawImage($img_obj, 0, 0, img_w, img_h);
+    }
+
+    function draw_img($img){
+        $img.load(function() {
+            $img_obj= this;
+            draw_img_on_canvas();
+            add_click_listen();
+        });
+    }
+
+    $('#paths').change(function() {
+        var val = $("#paths option:selected");
+        //draw the previously stored lines
+        draw_img_on_canvas();
+        var ctx = canvas.getContext('2d');
+        for (i = 0; i<val.length; i++) {
+            var path_ind = val[i].value;
+            var my_path = paths[path_ind-1];
+            ctx.beginPath();
+            ctx.moveTo(my_path[0][1], my_path[0][2]);
+            for (j = 1; j < my_path.length; j++) {
+                ctx.lineTo(my_path[j][1], my_path[j][2]);
+                ctx.stroke()
+            }
+        }
+    });
+
+    function save_path(){
+        if (last_path != null) {
+            //save the path that was being drawn
+            paths.push(last_path);
+            $('#paths')
+                 .append($("<option></option>")
+                 .attr("value", paths.length)
+                 .text('path_'+paths.length)); 
+            if (paths.length >= 5) {
+                $('#paths').attr('size', paths.length);
+            }
+            console.log(paths);
+        }
+        start_time = null;
+        last_path = null;
+    }
+
+    function add_scaled_point(dt, x, y) {
+        if (bltr) {
+            //scale the points
+            ref_h = bltr['tr'][0] - bltr['bl'][0];
+            ref_w = bltr['tr'][1] - bltr['bl'][1];
+            var scaled_x = (x / img_w) * ref_w;
+            var scaled_y = (y / img_h) * ref_h;
+            last_path.push([dt, scaled_x, scaled_y]);
+        } else {
+            last_path.push([dt, x, y]);
+        }
+    }
+
+    function add_click_listen() {
+        save_path();
+        touchDown = function(event, event1){
+            start_time = Date.now();
+            draw_img_on_canvas();
+            //why did i have event1? maybe for touch (it's been a while)
+            if (event1 !== undefined) {
+                event.pageX = event1.pageX;
+                event.pageY = event1.pageY;
+            }
+            var absolute = $(this).offset();
+            var x = event.pageX - absolute.left;
+            var y = event.pageY - absolute.top;
+            last_path = [];
+            last_path.push([0, x, y]);
+            var ctx = canvas.getContext('2d');
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+        }
+        touchMove = function(event) {
+            if (last_path!=null) {
+                var absolute = $(this).offset();
+                var x = event.pageX - absolute.left;
+                var y = event.pageY - absolute.top;
+                var dt = Date.now() - start_time;
+                last_path.push([dt, x, y]);
+                var ctx = canvas.getContext('2d');
+                ctx.lineTo(x, y);
+                ctx.stroke();
+            }
+        }
+        touchUp = function(event) {
+            save_path();
+        }
+        $(canvas).mousedown(touchDown);
+        $(canvas).mousemove(touchMove);
+        $(canvas).mouseup(touchUp);
+        //canvas.mouseleave(touchUp);
+    }
+
+    function fileOnload(e) {
+        var img_data = e.target.result;
+        var $img = $('<img>', { src: img_data });
+        draw_img($img);
+    }
+});
+</script>
+</head>
+
+
+<body>
+
+<div class="float">
+<canvas id="canvas" width="520px" height="520px"></canvas>
+</div>
+<div class="float">
+
+Paths:<br>
+<select size="5" id="paths" multiple="yes" > 
+</select>
+<br><br><br>
+
+Map: <input type="file" id="file-input"><br>
+Coords: <input type="file" id="coords-input">
+</div>
+
+</body>
