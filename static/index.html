@@ -1,5 +1,13 @@
 <head>
 <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+<script src="/static/anytime.5.0.5.js"></script>
+<link rel="stylesheet" type="text/css" href="static/anytime.5.0.5.css">
+
+<script src="static/jquery.liblink.js"></script>
+<script src="static/jquery.nouislider.js"></script>
+<link rel="stylesheet" type="text/css" href="static/jquery.nouislider.css">
+
+<script src="static/FileSaver.js"></script>
 <style>
 .float {
     float: left;
@@ -10,6 +18,7 @@
 $(function() {
     var $img_obj = null;
     var paths = [];
+    var path_time_bounds = [];
     var last_path = null;
     var start_time = null;
     var bltr = null;
@@ -21,6 +30,41 @@ $(function() {
     //this is to make the canvas fit in the page nicely
     ctx.canvas.width  = window.innerWidth*0.75;
     ctx.canvas.height = window.innerHeight-40;
+
+
+    //create a slider for selecting duration of a path
+    $('#path-props').hide();
+    $('#slider').noUiSlider({
+        start: [ 0, 600 ],
+        connect: true,
+        range: {
+            'min': 0,
+            'max': 3600
+        }
+    });
+    $('#slider').Link('upper').to($('#end'));
+    $('#slider').Link('lower').to($('#start'));
+
+
+    //setup datetime - could merge into 1, but that looks ugly
+    AnyTime.picker( "seldate", { format: "%m/%d/%Z" } );
+    $("#seltime").AnyTime_picker( { format: "%H:%i" });
+
+    //Set an input that sets the max time for time sliders
+    $('#seldur').bind('input', function() { 
+        // get the current value of the input field.
+        $('#slider').noUiSlider({range:{min:0, max:parseFloat($(this).val())} }, true);
+    });
+
+
+
+    function export_info(){
+        //read the start time in seconds since epoch
+        var datetime_str = $("#seldate")[0].value+' '+$("#seltime")[0].value;
+        var defaultConv = new AnyTime.Converter({utcFormatOffsetImposed: 0, format: "%m/%d/%Z %H:%i"});
+        var dated = defaultConv.parse(datetime_str).getTime()/1000.0;
+    }
+    
 
     $('#file-input').change(function(e) {
         var file = e.target.files[0];
@@ -76,11 +120,26 @@ $(function() {
         });
     }
 
+    function show_path_props(path_ind){
+        $('#path-name').text('path_'+path_ind);
+        if (path_time_bounds[path_ind] !== null) {
+            $("#slider").val(path_time_bounds[path_ind]);
+        } else {
+            $("#slider").val([0, 600]);
+        }
+        $('#path-props').show();
+    }
+
     $('#paths').change(function() {
         var val = $("#paths option:selected");
         //draw the previously stored lines
         draw_img_on_canvas();
         var ctx = canvas.getContext('2d');
+        if (val.length == 1) {
+            show_path_props(val[0].value);
+        } else {
+            $('#path-props').hide();
+        }
         for (i = 0; i<val.length; i++) {
             var path_ind = val[i].value;
             var my_path = paths[path_ind-1];
@@ -97,6 +156,7 @@ $(function() {
         if (last_path != null) {
             //save the path that was being drawn
             paths.push(last_path);
+            path_time_bounds.push(null);
             $('#paths')
                  .append($("<option></option>")
                  .attr("value", paths.length)
@@ -104,7 +164,7 @@ $(function() {
             if (paths.length >= 5) {
                 $('#paths').attr('size', paths.length);
             }
-            console.log(paths);
+            show_path_props(paths.length);
         }
         start_time = null;
         last_path = null;
@@ -160,7 +220,7 @@ $(function() {
         $(canvas).mousedown(touchDown);
         $(canvas).mousemove(touchMove);
         $(canvas).mouseup(touchUp);
-        //canvas.mouseleave(touchUp);
+        //$(canvas).mouseleave(touchUp);
     }
 
     function fileOnload(e) {
@@ -168,6 +228,16 @@ $(function() {
         var $img = $('<img>', { src: img_data });
         draw_img($img);
     }
+
+    $('#unset-props').click(function(){
+        var prop_ind=parseInt($('#path-name').text().substring(5));
+        console.log(prop_ind);
+        path_time_bounds[prop_ind] = null;
+    });
+    $('#set-props').click(function(){
+        var prop_ind=parseInt($('#path-name').text().substring(5));
+        path_time_bounds[prop_ind] = $("#slider").val();
+    });
 });
 </script>
 </head>
@@ -186,7 +256,27 @@ Paths:<br>
 <br><br><br>
 
 Map: <input type="file" id="file-input"><br>
-Coords: <input type="file" id="coords-input">
+Coords: <input type="file" id="coords-input"><br>
+<br><br><br>
+
+Base Date: <input type="text" id="seldate" value="07/30/2014" /><br>
+Base Time: <input type="text" id="seltime" value="12:34" /><br>
+Max Path End: <input type="text" id="seldur" value=3600 /><br>
+
+
+
+<br><br><br>
+<div id="path-props">
+    <h2><p id='path-name'></p></h2>
+    <button id="unset-props" type="button">Unset Time</button><br><br>
+    <div id="slider" class="slider"></div>
+    <input id="start" name="start" class="inputs">
+    <input id="end" name="end" class="inputs"><br>
+    <button id="set-props" type="button">Save Time</button>
+</div>
+
+
 </div>
 
 </body>
+
