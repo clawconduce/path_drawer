@@ -16,6 +16,8 @@
 
 <script>
 $(function() {
+    "use strict";
+
     var $img_obj = null;
     var paths = [];
     var path_time_bounds = [];
@@ -56,7 +58,10 @@ $(function() {
         set_max_range( parseFloat($(this).val()) );
     });
     function set_max_range(max_range) {
-        $('#slider').noUiSlider({range:{min:0, max:max_range} }, true);
+        $('#slidur').noUiSlider({range:{min:0, max:max_range} }, true);
+    }
+    function get_max_range(){
+        return parseFloat($('#seldur').val());
     }
 
 
@@ -117,9 +122,8 @@ $(function() {
                 $("#seltime")[0].value = imported_data['time'];
                 bltr = imported_data['bltr'];
                 set_max_range(imported_data['duration']);
-                path_time_bounds = imported_data['times'];
                 for (var j =0; j<imported_data['data'].length; j++){
-                    save_path(imported_data['data'][j]);
+                    save_path(imported_data['data'][j], imported_data['times'][j]);
                 }
             }
         }
@@ -172,26 +176,26 @@ $(function() {
         } else {
             $('#path-props').hide();
         }
-        for (i = 0; i<val.length; i++) {
+        for (var i = 0; i<val.length; i++) {
             var path_ind = val[i].value;
-            var my_path = paths[path_ind-1];
+            var my_path = paths[path_ind];
             ctx.beginPath();
             ctx.moveTo(my_path[0][1], my_path[0][2]);
-            for (j = 1; j < my_path.length; j++) {
+            for (var j = 1; j < my_path.length; j++) {
                 ctx.lineTo(my_path[j][1], my_path[j][2]);
                 ctx.stroke()
             }
         }
     });
 
-    function save_path(new_path) {
+    function save_path(new_path, new_time) {
         //save the path that was being drawn
         paths.push(new_path);
-        path_time_bounds.push(null);
+        path_time_bounds.push(new_time);
         $('#paths')
              .append($("<option></option>")
-             .attr("value", paths.length)
-             .text('path_'+paths.length)); 
+             .attr("value", (paths.length-1))
+             .text('path_'+(paths.length-1))); 
         if (paths.length >= 5) {
             $('#paths').attr('size', paths.length);
         }
@@ -200,7 +204,7 @@ $(function() {
 
     function save_current_path(){
         if (last_path != null) {
-            save_path(last_path);
+            save_path(last_path, null);
         }
         start_time = null;
         last_path = null;
@@ -221,7 +225,7 @@ $(function() {
 
     function add_click_listen() {
         save_current_path();
-        touchDown = function(event, event1){
+        var touchDown = function(event, event1){
             start_time = Date.now();
             draw_img_on_canvas();
             //why did i have event1? maybe for touch (it's been a while)
@@ -238,7 +242,7 @@ $(function() {
             ctx.beginPath();
             ctx.moveTo(x, y);
         }
-        touchMove = function(event) {
+        var touchMove = function(event) {
             if (last_path!=null) {
                 var absolute = $(this).offset();
                 var x = event.pageX - absolute.left;
@@ -250,7 +254,7 @@ $(function() {
                 ctx.stroke();
             }
         }
-        touchUp = function(event) {
+        var touchUp = function(event) {
             save_current_path();
         }
         $(canvas).mousedown(touchDown);
@@ -283,7 +287,7 @@ $(function() {
             'date': date_str,
             'time': time_str,
             'epoch': epoch_time,
-            'duration': parseFloat($('#seldur').val()),
+            'duration': get_max_range(),
             'bltr': bltr,
             'data': paths,
             'times': path_time_bounds,
@@ -291,6 +295,107 @@ $(function() {
         var blob = new Blob([JSON.stringify(info)], {type: "application/json;charset=utf-8"});
         saveAs(blob);
     });
+
+
+    function get_real_times(i){
+        if (path_time_bounds[i] !== null){
+            var start_time = path_time_bounds[i][0];
+            var end_time = path_time_bounds[i][1];
+        } else {
+            var start_time = 0;
+            var end_time = 600;
+        }
+        var set_dt = end_time - start_time;
+        var i_path = paths[i];
+        var drawn_start = i_path[0][0];
+        var drawn_end = i_path[i_path.length-1][0];
+        var drawn_dt = drawn_end - drawn_start;
+        var real_times = [start_time];
+        for (var j=1; j<i_path.length; j++){
+            var next_time = ((i_path[j][0]-drawn_start)/drawn_dt) * set_dt;
+            real_times.push(next_time);
+        }
+        return real_times;
+    }
+
+
+    $('#play').click(function() {
+        animate_paths();
+    });
+
+    function animate_paths() {
+        var play_inds = [];
+        var last_play_inds = [];
+        var real_time_inds = [];
+        var curr_t = 0.0;
+        var all_real_times = [];
+        for (var i=0; i<path_time_bounds.length; i++){
+            all_real_times.push( get_real_times(i) );
+
+            if ( all_real_times[i][0] > paths[i][0][0] ){
+                play_inds.push(0);
+            } else {
+                play_inds.push(null);
+            }
+            last_play_inds.push(null);
+        }
+
+        //draw
+        draw_img_on_canvas();
+
+        var start_time= (new Date()).getTime();
+
+        function update_animation() {
+            var current_time = (new Date()).getTime();
+            var curr_t = (current_time - start_time)/1000; //seconds
+            curr_t = curr_t*100; //play at 100x
+            var ret = animate_frame(curr_t, play_inds, last_play_inds);
+
+            //update the play inds
+            for (var i = 0; i < play_inds.length; i++){
+                var play_ind = play_inds[i];
+                last_play_inds[i] = play_ind;
+                if (play_ind === null){
+                    play_ind = 0;
+                }
+                var real_times = all_real_times[i];
+                while ( real_times[play_ind] < curr_t ) {
+                    play_ind += 1;
+                }
+                play_inds[i] = play_ind;
+            }
+
+            //set a timeout to run this again
+            var max_time = get_max_range();
+            if (curr_t < max_time) {
+                setTimeout(update_animation, 100);
+            }
+        }
+        update_animation();
+    }
+
+    function animate_frame(curr_t, play_inds, last_play_inds) {
+        var ctx = canvas.getContext('2d');
+
+        //draw the inds
+        for (var i = 0; i < play_inds.length; i++){
+            if ( play_inds[i] != last_play_inds[i] ) {
+                var start_ind = last_play_inds[i];
+                if (start_ind === null) {
+                    start_ind = 0;
+                }
+                var stop_ind = Math.min(play_inds[i], paths[i].length-1);
+                ctx.beginPath();
+                ctx.moveTo(paths[i][start_ind][1], paths[i][start_ind][2]);
+                for (var k=start_ind; k<stop_ind; k++){
+                    ctx.lineTo(paths[i][k+1][1], paths[i][k+1][2]);
+                    ctx.stroke();
+                }
+                ctx.stroke();
+            }
+        }
+    }
+
 });
 </script>
 </head>
@@ -311,12 +416,12 @@ Paths:<br>
 Map: <input type="file" id="file-input"><br>
 Coords: <input type="file" id="coords-input"><br>
 Import: <input type="file" id="import-input"><br>
-<button id="export" type="button">Export</button>
+<button id="export" type="button">Export</button><br><br>
+<button id="play" type="button">Play</button>
 <br><br><br>
 
 Base Date: <input type="text" id="seldate" value="07/30/2014" /><br>
 Base Time: <input type="text" id="seltime" value="12:34" /><br>
-Max Path End: <input type="text" id="seldur" value=3600 /><br>
 
 
 
@@ -324,6 +429,7 @@ Max Path End: <input type="text" id="seldur" value=3600 /><br>
 <div id="path-props">
     <h2><p id='path-name'></p></h2>
     <button id="unset-props" type="button">Unset Time</button><br><br>
+    Range Max Time: <input type="text" id="seldur" value=3600 /><br>
     <div id="slider" class="slider"></div>
     <input id="start" name="start" class="inputs">
     <input id="end" name="end" class="inputs"><br>
