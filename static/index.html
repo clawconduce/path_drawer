@@ -53,18 +53,13 @@ $(function() {
     //Set an input that sets the max time for time sliders
     $('#seldur').bind('input', function() { 
         // get the current value of the input field.
-        $('#slider').noUiSlider({range:{min:0, max:parseFloat($(this).val())} }, true);
+        set_max_range( parseFloat($(this).val()) );
     });
-
-
-
-    function export_info(){
-        //read the start time in seconds since epoch
-        var datetime_str = $("#seldate")[0].value+' '+$("#seltime")[0].value;
-        var defaultConv = new AnyTime.Converter({utcFormatOffsetImposed: 0, format: "%m/%d/%Z %H:%i"});
-        var dated = defaultConv.parse(datetime_str).getTime()/1000.0;
+    function set_max_range(max_range) {
+        $('#slider').noUiSlider({range:{min:0, max:max_range} }, true);
     }
-    
+
+
 
     $('#file-input').change(function(e) {
         var file = e.target.files[0];
@@ -89,6 +84,43 @@ $(function() {
             var bltr_data = JSON.parse(e.target.result);
             if ((bltr_data['bl'].length == 2) && (bltr_data['tr'].length == 2)) {
                 bltr = bltr_data
+            }
+        }
+        reader.readAsText(file);
+    });
+
+    $('#import-input').change(function(e) {
+        var file = e.target.files[0];
+
+        if (!file.type.match('application/json'))
+            return;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var imported_data = JSON.parse(e.target.result);
+            if (imported_data.hasOwnProperty('data') &&
+                imported_data.hasOwnProperty('times') &&
+                imported_data.hasOwnProperty('bltr') &&
+                imported_data.hasOwnProperty('duration') &&
+                imported_data.hasOwnProperty('date') &&
+                imported_data.hasOwnProperty('time')
+                    ){
+                if (imported_data['times'].length != imported_data['data'].length) {
+                    console.log(imported_data['times']);
+                    console.log(imported_data['times'].length);
+                    console.log(imported_data['data']);
+                    console.log(imported_data['data'].length);
+                    alert('Data and times are not in sync');
+                    return false;
+                }
+                $("#seldate")[0].value = imported_data['date'];
+                $("#seltime")[0].value = imported_data['time'];
+                bltr = imported_data['bltr'];
+                set_max_range(imported_data['duration']);
+                path_time_bounds = imported_data['times'];
+                for (var j =0; j<imported_data['data'].length; j++){
+                    save_path(imported_data['data'][j]);
+                }
             }
         }
         reader.readAsText(file);
@@ -152,19 +184,23 @@ $(function() {
         }
     });
 
-    function save_path(){
+    function save_path(new_path) {
+        //save the path that was being drawn
+        paths.push(new_path);
+        path_time_bounds.push(null);
+        $('#paths')
+             .append($("<option></option>")
+             .attr("value", paths.length)
+             .text('path_'+paths.length)); 
+        if (paths.length >= 5) {
+            $('#paths').attr('size', paths.length);
+        }
+        show_path_props(paths.length);
+    }
+
+    function save_current_path(){
         if (last_path != null) {
-            //save the path that was being drawn
-            paths.push(last_path);
-            path_time_bounds.push(null);
-            $('#paths')
-                 .append($("<option></option>")
-                 .attr("value", paths.length)
-                 .text('path_'+paths.length)); 
-            if (paths.length >= 5) {
-                $('#paths').attr('size', paths.length);
-            }
-            show_path_props(paths.length);
+            save_path(last_path);
         }
         start_time = null;
         last_path = null;
@@ -184,7 +220,7 @@ $(function() {
     }
 
     function add_click_listen() {
-        save_path();
+        save_current_path();
         touchDown = function(event, event1){
             start_time = Date.now();
             draw_img_on_canvas();
@@ -215,7 +251,7 @@ $(function() {
             }
         }
         touchUp = function(event) {
-            save_path();
+            save_current_path();
         }
         $(canvas).mousedown(touchDown);
         $(canvas).mousemove(touchMove);
@@ -230,13 +266,30 @@ $(function() {
     }
 
     $('#unset-props').click(function(){
-        var prop_ind=parseInt($('#path-name').text().substring(5));
-        console.log(prop_ind);
+        var prop_ind = parseInt($('#path-name').text().substring(5));
         path_time_bounds[prop_ind] = null;
     });
     $('#set-props').click(function(){
-        var prop_ind=parseInt($('#path-name').text().substring(5));
+        var prop_ind = parseInt($('#path-name').text().substring(5));
         path_time_bounds[prop_ind] = $("#slider").val();
+    });
+
+    $('#export').click(function (){
+        var date_str = $("#seldate")[0].value;
+        var time_str = $("#seltime")[0].value;
+        var defaultConv = new AnyTime.Converter({utcFormatOffsetImposed: 0, format: "%m/%d/%Z %H:%i"});
+        var epoch_time = defaultConv.parse(date_str+' '+time_str).getTime()/1000.0;
+        var info = {
+            'date': date_str,
+            'time': time_str,
+            'epoch': epoch_time,
+            'duration': parseFloat($('#seldur').val()),
+            'bltr': bltr,
+            'data': paths,
+            'times': path_time_bounds,
+        };
+        var blob = new Blob([JSON.stringify(info)], {type: "application/json;charset=utf-8"});
+        saveAs(blob);
     });
 });
 </script>
@@ -257,6 +310,8 @@ Paths:<br>
 
 Map: <input type="file" id="file-input"><br>
 Coords: <input type="file" id="coords-input"><br>
+Import: <input type="file" id="import-input"><br>
+<button id="export" type="button">Export</button>
 <br><br><br>
 
 Base Date: <input type="text" id="seldate" value="07/30/2014" /><br>
