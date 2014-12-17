@@ -53,7 +53,7 @@ $(function() {
     $("#seltime").AnyTime_picker( { format: "%H:%i" });
 
     //Set an input that sets the max time for time sliders
-    $('#seldur').bind('input', function() { 
+    $('#seldur').bind('input', function() {
         // get the current value of the input field.
         set_max_range( parseFloat($(this).val()) );
     });
@@ -192,14 +192,15 @@ $(function() {
         //save the path that was being drawn
         paths.push(new_path);
         path_time_bounds.push(new_time);
+        var path_ind = paths.length-1;
         $('#paths')
              .append($("<option></option>")
-             .attr("value", (paths.length-1))
-             .text('path_'+(paths.length-1))); 
+             .attr("value", path_ind)
+             .text('path_'+path_ind));
         if (paths.length >= 5) {
             $('#paths').attr('size', paths.length);
         }
-        show_path_props(paths.length);
+        show_path_props(path_ind);
     }
 
     function save_current_path(){
@@ -384,11 +385,15 @@ $(function() {
                 if (start_ind === null) {
                     start_ind = 0;
                 }
-                var stop_ind = Math.min(play_inds[i], paths[i].length-1);
+                if (start_ind > 0){
+                    //continue from the previous point
+                    start_ind = start_ind - 1;
+                }
+                var stop_ind = Math.min(play_inds[i], paths[i].length);
                 ctx.beginPath();
                 ctx.moveTo(paths[i][start_ind][1], paths[i][start_ind][2]);
                 for (var k=start_ind; k<stop_ind; k++){
-                    ctx.lineTo(paths[i][k+1][1], paths[i][k+1][2]);
+                    ctx.lineTo(paths[i][k][1], paths[i][k][2]);
                     ctx.stroke();
                 }
                 ctx.stroke();
@@ -409,7 +414,7 @@ $(function() {
 <div class="float">
 
 Paths:<br>
-<select size="5" id="paths" multiple="yes" > 
+<select size="5" id="paths" multiple="yes" >
 </select>
 <br><br><br>
 
