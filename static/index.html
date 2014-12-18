@@ -12,6 +12,9 @@
 .float {
     float: left;
 }
+.abs {
+    position: absolute;
+}
 </style>
 
 <script>
@@ -27,6 +30,7 @@ $(function() {
     var img_w = null;
     var img_h = null;
     var canvas = $('#canvas')[0];
+    var $draw_layer = $('#draw_layer');
     var ctx = canvas.getContext('2d');
     //this could probably be done better, but right now
     //this is to make the canvas fit in the page nicely
@@ -145,6 +149,8 @@ $(function() {
             img_h = height;
         }
         ctx.canvas.height = img_h;
+        $draw_layer.width(ctx.canvas.width);
+        $draw_layer.height(ctx.canvas.height);
         ctx.drawImage($img_obj, 0, 0, img_w, img_h);
     }
 
@@ -224,6 +230,9 @@ $(function() {
         }
     }
 
+
+
+
     function add_click_listen() {
         save_current_path();
         var touchDown = function(event, event1){
@@ -258,9 +267,9 @@ $(function() {
         var touchUp = function(event) {
             save_current_path();
         }
-        $(canvas).mousedown(touchDown);
-        $(canvas).mousemove(touchMove);
-        $(canvas).mouseup(touchUp);
+        $draw_layer.mousedown(touchDown);
+        $draw_layer.mousemove(touchMove);
+        $draw_layer.mouseup(touchUp);
         //$(canvas).mouseleave(touchUp);
     }
 
@@ -408,7 +417,14 @@ $(function() {
 
 <body>
 
-<div class="float">
+    <div class="demo-wrapper">
+      <div class="heatmap">
+
+      </div>
+    </div>
+
+<div class="float" id="img">
+<div id="draw_layer" class="float abs"></div>
 <canvas id="canvas" width="520px" height="520px"></canvas>
 </div>
 <div class="float">
