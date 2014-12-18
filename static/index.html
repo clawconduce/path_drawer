@@ -8,6 +8,9 @@
 <link rel="stylesheet" type="text/css" href="static/jquery.nouislider.css">
 
 <script src="static/FileSaver.js"></script>
+<script src="static/canvas-toBlob.js"></script>
+
+<script src="static/heatmap.min.js"></script>
 <style>
 .float {
     float: left;
@@ -32,11 +35,24 @@ $(function() {
     var canvas = $('#canvas')[0];
     var $draw_layer = $('#draw_layer');
     var ctx = canvas.getContext('2d');
+    var use_heatmap = false;
+    var heatmapInstance = null;
     //this could probably be done better, but right now
     //this is to make the canvas fit in the page nicely
     ctx.canvas.width  = window.innerWidth*0.75;
     ctx.canvas.height = window.innerHeight-40;
+    $draw_layer.width(ctx.canvas.width);
+    $draw_layer.height(ctx.canvas.height);
 
+
+    $('#use_heat').change(function() {
+        var val = $("#use_heat option:selected")[0];
+        if (val.value == "heat") {
+            use_heatmap = true;
+        } else {
+            use_heatmap = false;
+        }
+    });
 
     //create a slider for selecting duration of a path
     $('#path-props').hide();
@@ -129,6 +145,9 @@ $(function() {
                 for (var j =0; j<imported_data['data'].length; j++){
                     save_path(imported_data['data'][j], imported_data['times'][j]);
                 }
+                if (heatmapInstance !== null && imported_data.hasOwnProperty('heatmap_data')) {
+                    heatmapInstance.setData(imported_data['heatmap_data']);
+                }
             }
         }
         reader.readAsText(file);
@@ -148,9 +167,17 @@ $(function() {
             img_w = width;
             img_h = height;
         }
+        console.log(img_w, img_h);
         ctx.canvas.height = img_h;
-        $draw_layer.width(ctx.canvas.width);
-        $draw_layer.height(ctx.canvas.height);
+        $draw_layer.width(img_w);
+        $draw_layer.height(img_h);
+        //HACKS to get heatmaps working
+        heatmapInstance = h337.create({
+          container: document.querySelector('#draw_layer'),
+          radius: 30
+        });
+        $draw_layer.css({'position':'absolute'});
+
         ctx.drawImage($img_obj, 0, 0, img_w, img_h);
     }
 
@@ -232,40 +259,68 @@ $(function() {
 
 
 
+    function down_path(obj, event, event1){
+        start_time = Date.now();
+        draw_img_on_canvas();
+        //why did i have event1? maybe for touch (it's been a while)
+        if (event1 !== undefined) {
+            event.pageX = event1.pageX;
+            event.pageY = event1.pageY;
+        }
+        var absolute = $(obj).offset();
+        var x = event.pageX - absolute.left;
+        var y = event.pageY - absolute.top;
+        last_path = [];
+        last_path.push([0, x, y]);
+        var ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    }
+    function move_path(obj, event, event1){
+        if (last_path!=null) {
+            var absolute = $(obj).offset();
+            var x = event.pageX - absolute.left;
+            var y = event.pageY - absolute.top;
+            var dt = Date.now() - start_time;
+            last_path.push([dt, x, y]);
+            var ctx = canvas.getContext('2d');
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+    }
+    function up_path(obj, event, event1){
+        save_current_path();
+    }
+    function down_heat(obj, event, event1){
+        //looks like event.offsetX/Y probably works
+        var absolute = $(obj).offset();
+        var x = event.offsetX; //event.pageX - absolute.left;
+        var y = event.offsetY; //event.pageY - absolute.top;
+        heatmapInstance.addData({
+            x: x,
+            y: y,
+            value: 1
+          });
+    }
 
     function add_click_listen() {
         save_current_path();
         var touchDown = function(event, event1){
-            start_time = Date.now();
-            draw_img_on_canvas();
-            //why did i have event1? maybe for touch (it's been a while)
-            if (event1 !== undefined) {
-                event.pageX = event1.pageX;
-                event.pageY = event1.pageY;
-            }
-            var absolute = $(this).offset();
-            var x = event.pageX - absolute.left;
-            var y = event.pageY - absolute.top;
-            last_path = [];
-            last_path.push([0, x, y]);
-            var ctx = canvas.getContext('2d');
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-        }
-        var touchMove = function(event) {
-            if (last_path!=null) {
-                var absolute = $(this).offset();
-                var x = event.pageX - absolute.left;
-                var y = event.pageY - absolute.top;
-                var dt = Date.now() - start_time;
-                last_path.push([dt, x, y]);
-                var ctx = canvas.getContext('2d');
-                ctx.lineTo(x, y);
-                ctx.stroke();
+            if (use_heatmap) {
+                down_heat(this, event, event1);
+            } else {
+                down_path(this, event, event1);
             }
         }
-        var touchUp = function(event) {
-            save_current_path();
+        var touchMove = function(event, event1) {
+            if (!use_heatmap){
+                move_path(this, event, event1);
+            }
+        }
+        var touchUp = function(event, event1) {
+            if (!use_heatmap){
+                up_path(this, event, event1);
+            }
         }
         $draw_layer.mousedown(touchDown);
         $draw_layer.mousemove(touchMove);
@@ -288,11 +343,23 @@ $(function() {
         path_time_bounds[prop_ind] = $("#slider").val();
     });
 
+    $('#export-heatmap').click(function() {
+        //var img_data = $('.heatmap-canvas')[0].toDataURL('image/png');
+        var heat_canvas = $('.heatmap-canvas')[0];
+        heat_canvas.toBlob(function(blob) {
+            saveAs(blob);
+        });
+    });
+
     $('#export').click(function (){
         var date_str = $("#seldate")[0].value;
         var time_str = $("#seltime")[0].value;
         var defaultConv = new AnyTime.Converter({utcFormatOffsetImposed: 0, format: "%m/%d/%Z %H:%i"});
         var epoch_time = defaultConv.parse(date_str+' '+time_str).getTime()/1000.0;
+        var heatmap_data = [];
+        if (heatmapInstance !== null){
+            heatmap_data = heatmapInstance.getData();
+        }
         var info = {
             'date': date_str,
             'time': time_str,
@@ -301,6 +368,7 @@ $(function() {
             'bltr': bltr,
             'data': paths,
             'times': path_time_bounds,
+            'heatmap_data': heatmap_data,
         };
         var blob = new Blob([JSON.stringify(info)], {type: "application/json;charset=utf-8"});
         saveAs(blob);
@@ -425,19 +493,26 @@ $(function() {
 
 <div class="float" id="img">
 <div id="draw_layer" class="float abs"></div>
-<canvas id="canvas" width="520px" height="520px"></canvas>
+<div id="cdiv"><canvas id="canvas" width="520px" height="520px"></canvas></div>
 </div>
 <div class="float">
 
-Paths:<br>
-<select size="5" id="paths" multiple="yes" >
+Mode:<br>
+<select id="use_heat">
+<option value="draw" selected>Draw Paths</option>
+<option value="heat">Heatmap</option>
 </select>
+<br><br><br>
+
+Paths:<br>
+<select size="5" id="paths" multiple="yes" ></select>
 <br><br><br>
 
 Map: <input type="file" id="file-input"><br>
 Coords: <input type="file" id="coords-input"><br>
 Import: <input type="file" id="import-input"><br>
 <button id="export" type="button">Export</button><br><br>
+<button id="export-heatmap" type="button">Export Heatmap</button><br><br>
 <button id="play" type="button">Play</button>
 <br><br><br>
 
