@@ -35,14 +35,8 @@ $(function() {
     var canvas = $('#canvas')[0];
     var $draw_layer = $('#draw_layer');
     var ctx = canvas.getContext('2d');
-    var use_heatmap = false;
+    var use_heatmap = true;
     var heatmapInstance = null;
-    //this could probably be done better, but right now
-    //this is to make the canvas fit in the page nicely
-    ctx.canvas.width  = window.innerWidth*0.75;
-    ctx.canvas.height = window.innerHeight-40;
-    $draw_layer.width(ctx.canvas.width);
-    $draw_layer.height(ctx.canvas.height);
 
 
     $('#use_heat').change(function() {
@@ -158,7 +152,8 @@ $(function() {
         //scale the image
         var height = $img_obj.height;
         var width = $img_obj.width;
-        var cap_size = ctx.canvas.width*0.75;
+        var cap_size = 2865;
+        //var cap_size = ctx.canvas.width*0.75;
         if (width > cap_size) {
             var ratio = width/cap_size;
             img_w = cap_size;
@@ -172,9 +167,16 @@ $(function() {
         $draw_layer.width(img_w);
         $draw_layer.height(img_h);
         //HACKS to get heatmaps working
+        var radius;
+        if (img_w < 1200) {
+            radius = 20;
+        } else {
+            //a little arbritrary
+            radius = Math.ceil(img_w/300) * 10;
+        }
         heatmapInstance = h337.create({
           container: document.querySelector('#draw_layer'),
-          radius: 30
+          radius: radius
         });
         $draw_layer.css({'position':'absolute'});
 
@@ -493,14 +495,14 @@ $(function() {
 
 <div class="float" id="img">
 <div id="draw_layer" class="float abs"></div>
-<div id="cdiv"><canvas id="canvas" width="520px" height="520px"></canvas></div>
+<div id="cdiv"><canvas id="canvas" width="2864px" height="520px"></canvas></div>
 </div>
 <div class="float">
 
 Mode:<br>
 <select id="use_heat">
-<option value="draw" selected>Draw Paths</option>
-<option value="heat">Heatmap</option>
+<option value="draw">Draw Paths</option>
+<option value="heat" selected>Heatmap</option>
 </select>
 <br><br><br>
 
