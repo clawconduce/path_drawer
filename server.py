@@ -2,9 +2,6 @@ from flask import Flask, url_for, request, send_file
 app = Flask(__name__)
 
 import os.path
-import cStringIO
-import base64
-import numpy as np
 import json
 app = Flask(__name__, static_folder=os.path.join(os.path.dirname(__file__), 'static'))
 
