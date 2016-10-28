@@ -1,0 +1,548 @@
+<head>
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
+<script src="/static/anytime.5.0.5.js"></script>
+<link rel="stylesheet" type="text/css" href="static/anytime.5.0.5.css">
+
+<script src="static/jquery.liblink.js"></script>
+<script src="static/jquery.nouislider.js"></script>
+<link rel="stylesheet" type="text/css" href="static/jquery.nouislider.css">
+
+<script src="static/FileSaver.js"></script>
+<script src="static/canvas-toBlob.js"></script>
+
+<script src="static/heatmap.min.js"></script>
+<style>
+.float {
+    float: left;
+}
+.abs {
+    position: absolute;
+}
+</style>
+
+<script>
+$(function() {
+    "use strict";
+
+    var $img_obj = null;
+    var paths = [];
+    var path_time_bounds = [];
+    var last_path = null;
+    var start_time = null;
+    var bltr = null;
+    var img_w = null;
+    var img_h = null;
+    var canvas = $('#canvas')[0];
+    var $draw_layer = $('#draw_layer');
+    var ctx = canvas.getContext('2d');
+    var use_heatmap = true;
+    var heatmapInstance = null;
+
+
+    $('#use_heat').change(function() {
+        var val = $("#use_heat option:selected")[0];
+        if (val.value == "heat") {
+            use_heatmap = true;
+        } else {
+            use_heatmap = false;
+        }
+    });
+
+    //create a slider for selecting duration of a path
+    $('#path-props').hide();
+    $('#slider').noUiSlider({
+        start: [ 0, 600 ],
+        connect: true,
+        range: {
+            'min': 0,
+            'max': 3600
+        }
+    });
+    $('#slider').Link('upper').to($('#end'));
+    $('#slider').Link('lower').to($('#start'));
+
+
+    //setup datetime - could merge into 1, but that looks ugly
+    AnyTime.picker( "seldate", { format: "%m/%d/%Z" } );
+    $("#seltime").AnyTime_picker( { format: "%H:%i" });
+
+    //Set an input that sets the max time for time sliders
+    $('#seldur').bind('input', function() {
+        // get the current value of the input field.
+        set_max_range( parseFloat($(this).val()) );
+    });
+    function set_max_range(max_range) {
+        $('#slidur').noUiSlider({range:{min:0, max:max_range} }, true);
+    }
+    function get_max_range(){
+        return parseFloat($('#seldur').val());
+    }
+
+
+
+    $('#file-input').change(function(e) {
+        var file = e.target.files[0];
+
+        var imageType = /image.*/;
+        if (!file.type.match(imageType))
+            return;
+
+        var reader = new FileReader();
+        reader.onload = fileOnload;
+        reader.readAsDataURL(file);
+    });
+
+    $('#coords-input').change(function(e) {
+        var file = e.target.files[0];
+
+        if (!file.type.match('application/json'))
+            return;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var bltr_data = JSON.parse(e.target.result);
+            if ((bltr_data['bl'].length == 2) && (bltr_data['tr'].length == 2)) {
+                bltr = bltr_data
+            }
+        }
+        reader.readAsText(file);
+    });
+
+    $('#import-input').change(function(e) {
+        var file = e.target.files[0];
+
+        if (!file.type.match('application/json'))
+            return;
+
+        var reader = new FileReader();
+        reader.onload = function(e) {
+            var imported_data = JSON.parse(e.target.result);
+            if (imported_data.hasOwnProperty('data') &&
+                imported_data.hasOwnProperty('times') &&
+                imported_data.hasOwnProperty('bltr') &&
+                imported_data.hasOwnProperty('duration') &&
+                imported_data.hasOwnProperty('date') &&
+                imported_data.hasOwnProperty('time')
+                    ){
+                if (imported_data['times'].length != imported_data['data'].length) {
+                    console.log(imported_data['times']);
+                    console.log(imported_data['times'].length);
+                    console.log(imported_data['data']);
+                    console.log(imported_data['data'].length);
+                    alert('Data and times are not in sync');
+                    return false;
+                }
+                $("#seldate")[0].value = imported_data['date'];
+                $("#seltime")[0].value = imported_data['time'];
+                bltr = imported_data['bltr'];
+                set_max_range(imported_data['duration']);
+                for (var j =0; j<imported_data['data'].length; j++){
+                    save_path(imported_data['data'][j], imported_data['times'][j]);
+                }
+                if (heatmapInstance !== null && imported_data.hasOwnProperty('heatmap_data')) {
+                    for (var n =0; n<imported_data['heatmap_data']['data'].length; n++){
+                        imported_data['heatmap_data']['data'][n].x =
+                            (parseInt(imported_data['heatmap_data']['data'][n].x) * 1.025) + 406;
+                        imported_data['heatmap_data']['data'][n].y =
+                            (parseInt(imported_data['heatmap_data']['data'][n].y) * 1.025) + 24;
+                    }
+                    heatmapInstance.setData(imported_data['heatmap_data']);
+                }
+            }
+        }
+        reader.readAsText(file);
+    });
+
+    function draw_img_on_canvas(){
+        var ctx = canvas.getContext('2d');
+        //scale the image
+        var height = $img_obj.height;
+        var width = $img_obj.width;
+        var cap_size = 2865;
+        //var cap_size = ctx.canvas.width*0.75;
+        if (width > cap_size) {
+            var ratio = width/cap_size;
+            img_w = cap_size;
+            img_h = height/ratio;
+        } else {
+            img_w = width;
+            img_h = height;
+        }
+        console.log(img_w, img_h);
+        ctx.canvas.height = img_h;
+        $draw_layer.width(img_w);
+        $draw_layer.height(img_h);
+        //HACKS to get heatmaps working
+        var radius;
+        if (img_w < 1200) {
+            radius = 20;
+        } else {
+            //a little arbritrary
+            radius = Math.ceil(img_w/300) * 10;
+        }
+        radius=20;
+        heatmapInstance = h337.create({
+          container: document.querySelector('#draw_layer'),
+          radius: radius
+        });
+        $draw_layer.css({'position':'absolute'});
+
+        ctx.drawImage($img_obj, 0, 0, img_w, img_h);
+    }
+
+    function draw_img($img){
+        $img.load(function() {
+            $img_obj= this;
+            draw_img_on_canvas();
+            add_click_listen();
+        });
+    }
+
+    function show_path_props(path_ind){
+        $('#path-name').text('path_'+path_ind);
+        if (path_time_bounds[path_ind] !== null) {
+            $("#slider").val(path_time_bounds[path_ind]);
+        } else {
+            $("#slider").val([0, 600]);
+        }
+        $('#path-props').show();
+    }
+
+    $('#paths').change(function() {
+        var val = $("#paths option:selected");
+        //draw the previously stored lines
+        draw_img_on_canvas();
+        var ctx = canvas.getContext('2d');
+        if (val.length == 1) {
+            show_path_props(val[0].value);
+        } else {
+            $('#path-props').hide();
+        }
+        for (var i = 0; i<val.length; i++) {
+            var path_ind = val[i].value;
+            var my_path = paths[path_ind];
+            ctx.beginPath();
+            ctx.moveTo(my_path[0][1], my_path[0][2]);
+            for (var j = 1; j < my_path.length; j++) {
+                ctx.lineTo(my_path[j][1], my_path[j][2]);
+                ctx.stroke()
+            }
+        }
+    });
+
+    function save_path(new_path, new_time) {
+        //save the path that was being drawn
+        paths.push(new_path);
+        path_time_bounds.push(new_time);
+        var path_ind = paths.length-1;
+        $('#paths')
+             .append($("<option></option>")
+             .attr("value", path_ind)
+             .text('path_'+path_ind));
+        if (paths.length >= 5) {
+            $('#paths').attr('size', paths.length);
+        }
+        show_path_props(path_ind);
+    }
+
+    function save_current_path(){
+        if (last_path != null) {
+            save_path(last_path, null);
+        }
+        start_time = null;
+        last_path = null;
+    }
+
+    function add_scaled_point(dt, x, y) {
+        if (bltr) {
+            //scale the points
+            ref_h = bltr['tr'][0] - bltr['bl'][0];
+            ref_w = bltr['tr'][1] - bltr['bl'][1];
+            var scaled_x = (x / img_w) * ref_w;
+            var scaled_y = (y / img_h) * ref_h;
+            last_path.push([dt, scaled_x, scaled_y]);
+        } else {
+            last_path.push([dt, x, y]);
+        }
+    }
+
+
+
+    function down_path(obj, event, event1){
+        start_time = Date.now();
+        draw_img_on_canvas();
+        //why did i have event1? maybe for touch (it's been a while)
+        if (event1 !== undefined) {
+            event.pageX = event1.pageX;
+            event.pageY = event1.pageY;
+        }
+        var absolute = $(obj).offset();
+        var x = event.pageX - absolute.left;
+        var y = event.pageY - absolute.top;
+        last_path = [];
+        last_path.push([0, x, y]);
+        var ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+    }
+    function move_path(obj, event, event1){
+        if (last_path!=null) {
+            var absolute = $(obj).offset();
+            var x = event.pageX - absolute.left;
+            var y = event.pageY - absolute.top;
+            var dt = Date.now() - start_time;
+            last_path.push([dt, x, y]);
+            var ctx = canvas.getContext('2d');
+            ctx.lineTo(x, y);
+            ctx.stroke();
+        }
+    }
+    function up_path(obj, event, event1){
+        save_current_path();
+    }
+    function down_heat(obj, event, event1){
+        //looks like event.offsetX/Y probably works
+        var absolute = $(obj).offset();
+        var x = event.offsetX; //event.pageX - absolute.left;
+        var y = event.offsetY; //event.pageY - absolute.top;
+        heatmapInstance.addData({
+            x: x,
+            y: y,
+            value: 1
+          });
+    }
+
+    function add_click_listen() {
+        save_current_path();
+        var touchDown = function(event, event1){
+            if (use_heatmap) {
+                down_heat(this, event, event1);
+            } else {
+                down_path(this, event, event1);
+            }
+        }
+        var touchMove = function(event, event1) {
+            if (!use_heatmap){
+                move_path(this, event, event1);
+            }
+        }
+        var touchUp = function(event, event1) {
+            if (!use_heatmap){
+                up_path(this, event, event1);
+            }
+        }
+        $draw_layer.mousedown(touchDown);
+        $draw_layer.mousemove(touchMove);
+        $draw_layer.mouseup(touchUp);
+        //$(canvas).mouseleave(touchUp);
+    }
+
+    function fileOnload(e) {
+        var img_data = e.target.result;
+        var $img = $('<img>', { src: img_data });
+        draw_img($img);
+    }
+
+    $('#unset-props').click(function(){
+        var prop_ind = parseInt($('#path-name').text().substring(5));
+        path_time_bounds[prop_ind] = null;
+    });
+    $('#set-props').click(function(){
+        var prop_ind = parseInt($('#path-name').text().substring(5));
+        path_time_bounds[prop_ind] = $("#slider").val();
+    });
+
+    $('#export-heatmap').click(function() {
+        //var img_data = $('.heatmap-canvas')[0].toDataURL('image/png');
+        var heat_canvas = $('.heatmap-canvas')[0];
+        heat_canvas.toBlob(function(blob) {
+            saveAs(blob);
+        });
+    });
+
+    $('#export').click(function (){
+        var date_str = $("#seldate")[0].value;
+        var time_str = $("#seltime")[0].value;
+        var defaultConv = new AnyTime.Converter({utcFormatOffsetImposed: 0, format: "%m/%d/%Z %H:%i"});
+        var epoch_time = defaultConv.parse(date_str+' '+time_str).getTime()/1000.0;
+        var heatmap_data = [];
+        if (heatmapInstance !== null){
+            heatmap_data = heatmapInstance.getData();
+        }
+        var info = {
+            'date': date_str,
+            'time': time_str,
+            'epoch': epoch_time,
+            'duration': get_max_range(),
+            'bltr': bltr,
+            'data': paths,
+            'times': path_time_bounds,
+            'heatmap_data': heatmap_data,
+        };
+        var blob = new Blob([JSON.stringify(info)], {type: "application/json;charset=utf-8"});
+        saveAs(blob);
+    });
+
+
+    function get_real_times(i){
+        if (path_time_bounds[i] !== null){
+            var start_time = path_time_bounds[i][0];
+            var end_time = path_time_bounds[i][1];
+        } else {
+            var start_time = 0;
+            var end_time = 600;
+        }
+        var set_dt = end_time - start_time;
+        var i_path = paths[i];
+        var drawn_start = i_path[0][0];
+        var drawn_end = i_path[i_path.length-1][0];
+        var drawn_dt = drawn_end - drawn_start;
+        var real_times = [start_time];
+        for (var j=1; j<i_path.length; j++){
+            var next_time = ((i_path[j][0]-drawn_start)/drawn_dt) * set_dt;
+            real_times.push(next_time);
+        }
+        return real_times;
+    }
+
+
+    $('#play').click(function() {
+        animate_paths();
+    });
+
+    function animate_paths() {
+        var play_inds = [];
+        var last_play_inds = [];
+        var real_time_inds = [];
+        var curr_t = 0.0;
+        var all_real_times = [];
+        for (var i=0; i<path_time_bounds.length; i++){
+            all_real_times.push( get_real_times(i) );
+
+            if ( all_real_times[i][0] > paths[i][0][0] ){
+                play_inds.push(0);
+            } else {
+                play_inds.push(null);
+            }
+            last_play_inds.push(null);
+        }
+
+        //draw
+        draw_img_on_canvas();
+
+        var start_time= (new Date()).getTime();
+
+        function update_animation() {
+            var current_time = (new Date()).getTime();
+            var curr_t = (current_time - start_time)/1000; //seconds
+            curr_t = curr_t*100; //play at 100x
+            var ret = animate_frame(curr_t, play_inds, last_play_inds);
+
+            //update the play inds
+            for (var i = 0; i < play_inds.length; i++){
+                var play_ind = play_inds[i];
+                last_play_inds[i] = play_ind;
+                if (play_ind === null){
+                    play_ind = 0;
+                }
+                var real_times = all_real_times[i];
+                while ( real_times[play_ind] < curr_t ) {
+                    play_ind += 1;
+                }
+                play_inds[i] = play_ind;
+            }
+
+            //set a timeout to run this again
+            var max_time = get_max_range();
+            if (curr_t < max_time) {
+                setTimeout(update_animation, 100);
+            }
+        }
+        update_animation();
+    }
+
+    function animate_frame(curr_t, play_inds, last_play_inds) {
+        var ctx = canvas.getContext('2d');
+
+        //draw the inds
+        for (var i = 0; i < play_inds.length; i++){
+            if ( play_inds[i] != last_play_inds[i] ) {
+                var start_ind = last_play_inds[i];
+                if (start_ind === null) {
+                    start_ind = 0;
+                }
+                if (start_ind > 0){
+                    //continue from the previous point
+                    start_ind = start_ind - 1;
+                }
+                var stop_ind = Math.min(play_inds[i], paths[i].length);
+                ctx.beginPath();
+                ctx.moveTo(paths[i][start_ind][1], paths[i][start_ind][2]);
+                for (var k=start_ind; k<stop_ind; k++){
+                    ctx.lineTo(paths[i][k][1], paths[i][k][2]);
+                    ctx.stroke();
+                }
+                ctx.stroke();
+            }
+        }
+    }
+
+});
+</script>
+</head>
+
+
+<body>
+
+    <div class="demo-wrapper">
+      <div class="heatmap">
+
+      </div>
+    </div>
+
+<div class="float" id="img">
+<div id="draw_layer" class="float abs"></div>
+<div id="cdiv"><canvas id="canvas" width="2864px" height="520px"></canvas></div>
+</div>
+<div class="float">
+
+Mode:<br>
+<select id="use_heat">
+<option value="draw">Draw Paths</option>
+<option value="heat" selected>Heatmap</option>
+</select>
+<br><br><br>
+
+Paths:<br>
+<select size="5" id="paths" multiple="yes" ></select>
+<br><br><br>
+
+Map: <input type="file" id="file-input"><br>
+Coords: <input type="file" id="coords-input"><br>
+Import: <input type="file" id="import-input"><br>
+<button id="export" type="button">Export</button><br><br>
+<button id="export-heatmap" type="button">Export Heatmap</button><br><br>
+<button id="play" type="button">Play</button>
+<br><br><br>
+
+Base Date: <input type="text" id="seldate" value="07/30/2014" /><br>
+Base Time: <input type="text" id="seltime" value="12:34" /><br>
+
+
+
+<br><br><br>
+<div id="path-props">
+    <h2><p id='path-name'></p></h2>
+    <button id="unset-props" type="button">Unset Time</button><br><br>
+    Range Max Time: <input type="text" id="seldur" value=3600 /><br>
+    <div id="slider" class="slider"></div>
+    <input id="start" name="start" class="inputs">
+    <input id="end" name="end" class="inputs"><br>
+    <button id="set-props" type="button">Save Time</button>
+</div>
+
+
+</div>
+
+</body>
+
